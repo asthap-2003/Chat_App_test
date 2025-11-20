@@ -34,6 +34,34 @@ export function ChatInterface() {
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Latest message for each contact
+  const [latestMessages, setLatestMessages] = useState<{ [userId: string]: Message | null }>({});
+  // Load latest message for each user
+  const loadLatestMessages = async () => {
+    if (!profile) return;
+    const latest: { [userId: string]: Message | null } = {};
+    for (const user of users) {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .or(`and(sender_id.eq.${profile.id},recipient_id.eq.${user.id}),and(sender_id.eq.${user.id},recipient_id.eq.${profile.id})`)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (!error && data && data.length > 0) {
+        latest[user.id] = data[0];
+      } else {
+        latest[user.id] = null;
+      }
+    }
+    setLatestMessages(latest);
+  };
+
+  // Reload latest messages when users or messages change
+  useEffect(() => {
+    loadLatestMessages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users, messages, profile]);
+
   // Load chat request status when a user is selected (must be after selectedUser/profile are declared)
   useEffect(() => {
     if (!selectedUser || !profile) {
@@ -303,7 +331,7 @@ export function ChatInterface() {
         console.log('Message sent:', data);
       }
     } catch (error) {
-      alert('Exception sending message: ' + (error?.message || error));
+  alert('Exception sending message: ' + ((error as any)?.message || error));
       console.error('Exception sending message:', error);
     } finally {
       setLoading(false);
@@ -448,31 +476,37 @@ export function ChatInterface() {
                     user.display_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     user.email.toLowerCase().includes(searchTerm.toLowerCase())
                   )
-                  .map((user) => (
-                    <button
-                      key={user.id}
-                      onClick={() => setSelectedUser(user)}
-                      className={`w-full flex items-center space-x-3 p-3 rounded-lg transition ${
-                        selectedUser?.id === user.id
-                          ? 'bg-blue-50 border border-blue-200'
-                          : 'hover:bg-gray-50'
-                      }`}
-                    >
-                      <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0"
-                        style={{ backgroundColor: user.avatar_color }}
+                  .map((user) => {
+                    const latest = latestMessages[user.id];
+                    return (
+                      <button
+                        key={user.id}
+                        onClick={() => setSelectedUser(user)}
+                        className={`w-full flex items-center space-x-3 p-3 rounded-lg transition ${
+                          selectedUser?.id === user.id
+                            ? 'bg-blue-50 border border-blue-200'
+                            : 'hover:bg-gray-50'
+                        }`}
                       >
-                        {user.display_name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="flex-1 text-left">
-                        <p className="font-medium text-gray-800">{user.display_name}</p>
-                        <p className="text-xs text-gray-500 flex items-center space-x-1">
-                          {statusOptions.find((s) => s.value === user.status)?.icon}
-                          <span>{user.status || 'Available'}</span>
-                        </p>
-                      </div>
-                    </button>
-                  ))}
+                        <div
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0"
+                          style={{ backgroundColor: user.avatar_color }}
+                        >
+                          {user.display_name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 text-left">
+                          <p className="font-medium text-gray-800">{user.display_name}</p>
+                          {latest ? (
+                            <p className="text-xs font-semibold text-black truncate" title={latest.content}>
+                              {latest.sender_id === profile?.id ? 'You: ' : ''}{latest.content}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-gray-400 italic">No messages yet</p>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
               </div>
             )}
           </div>
