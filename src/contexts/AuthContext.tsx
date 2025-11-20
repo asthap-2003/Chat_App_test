@@ -52,7 +52,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (error) throw error;
-      setProfile(data);
+      // Always preserve status if already set and not changed in DB
+      setProfile((prev) => {
+        if (!data) return prev;
+        // If DB returns null/undefined status, fallback to previous or 'Available'
+        const status = data.status ?? prev?.status ?? 'Available';
+        return { ...data, status };
+      });
     } catch (error) {
       console.error('Error loading profile:', error);
     } finally {

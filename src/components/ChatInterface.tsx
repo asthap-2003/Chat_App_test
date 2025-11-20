@@ -1,10 +1,13 @@
+
+
 import { useState, useEffect, useRef } from 'react';
-import { supabase, Profile, Message, Group } from '../lib/supabase';
+import { supabase, Profile, Message, Group, ChatRequest } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Send, LogOut, User, Circle, CheckCircle2, XCircle, MinusCircle, Clock, CircleDashed } from 'lucide-react';
 
 export function ChatInterface() {
-  const { profile, signOut, setProfile } = useAuth?.() || {};
+
+  const { profile, signOut, setProfile } = useAuth();
   const statusOptions = [
     { value: 'Available', label: 'Available', icon: <CheckCircle2 className="w-4 h-4 text-green-500 inline" /> },
     { value: 'Busy', label: 'Busy', icon: <XCircle className="w-4 h-4 text-red-500 inline" /> },
@@ -13,7 +16,46 @@ export function ChatInterface() {
     { value: 'Appear away', label: 'Appear away', icon: <CircleDashed className="w-4 h-4 text-yellow-400 inline" /> },
     { value: 'Appear offline', label: 'Appear offline', icon: <Circle className="w-4 h-4 text-gray-400 inline" /> },
   ];
+  // All state declarations must be above any use/effect
+  const [chatRequest, setChatRequest] = useState<ChatRequest | null>(null);
+  const [requestLoading, setRequestLoading] = useState(false);
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  const [users, setUsers] = useState<Profile[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [otherTyping, setOtherTyping] = useState(false);
+  const typingTimeout = useRef<NodeJS.Timeout | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load chat request status when a user is selected (must be after selectedUser/profile are declared)
+  useEffect(() => {
+    if (!selectedUser || !profile) {
+      setChatRequest(null);
+      return;
+    }
+    const fetchRequest = async () => {
+      setRequestLoading(true);
+      const { data, error } = await supabase
+        .from('chat_requests')
+        .select('*')
+        .or(`and(sender_id.eq.${profile.id},recipient_id.eq.${selectedUser.id}),and(sender_id.eq.${selectedUser.id},recipient_id.eq.${profile.id})`)
+        .order('created_at', { ascending: true });
+      if (!error && data && data.length > 0) {
+        setChatRequest(data[data.length - 1]);
+      } else {
+        setChatRequest(null);
+      }
+      setRequestLoading(false);
+    };
+    fetchRequest();
+  }, [selectedUser, profile]);
   const handleStatusChange = async (status: string) => {
     if (!profile) return;
     try {
@@ -24,15 +66,39 @@ export function ChatInterface() {
     }
     setShowStatusDropdown(false);
   };
-  const [users, setUsers] = useState<Profile[]>([]);
-  const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
-  const [newGroupName, setNewGroupName] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Typing indicator: send event when typing
+  useEffect(() => {
+    if (!(selectedUser || selectedGroup) || !profile) return;
+    const channel = supabase.channel('typing-indicator');
+    channel.on('broadcast', { event: 'typing' }, (payload) => {
+      if (selectedUser && payload.payload.sender_id === selectedUser.id && payload.payload.recipient_id === profile.id) {
+        setOtherTyping(true);
+        setTimeout(() => setOtherTyping(false), 2000);
+      } else if (selectedGroup && payload.payload.group_id === selectedGroup.id && payload.payload.sender_id !== profile.id) {
+        setOtherTyping(true);
+        setTimeout(() => setOtherTyping(false), 2000);
+      }
+    });
+    channel.subscribe();
+    return () => { channel.unsubscribe(); };
+  }, [selectedUser, selectedGroup, profile]);
+
+  const handleTyping = () => {
+    if (!(selectedUser || selectedGroup) || !profile) return;
+    if (typingTimeout.current) clearTimeout(typingTimeout.current);
+    setIsTyping(true);
+    // Broadcast typing event
+    supabase.channel('typing-indicator').send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: {
+        sender_id: profile.id,
+        recipient_id: selectedUser ? selectedUser.id : null,
+        group_id: selectedGroup ? selectedGroup.id : null,
+      },
+    });
+    typingTimeout.current = setTimeout(() => setIsTyping(false), 2000);
+  };
 
   useEffect(() => {
     if (profile) {
@@ -209,6 +275,25 @@ export function ChatInterface() {
     if (!profile) return;
     setLoading(true);
     try {
+      // Only allow sending if chat is accepted or group chat
+      if (selectedUser) {
+        if (!chatRequest) {
+          // Create a new chat request
+          const { data, error } = await supabase.from('chat_requests').insert({
+            sender_id: profile.id,
+            recipient_id: selectedUser.id,
+            status: 'pending',
+          }).select();
+          if (error) throw error;
+          setChatRequest(data[0]);
+          setLoading(false);
+          setNewMessage('');
+          return;
+        } else if (chatRequest.status !== 'accepted') {
+          setLoading(false);
+          return;
+        }
+      }
       let messageData: any = {
         sender_id: profile.id,
         content: newMessage.trim(),
@@ -231,6 +316,21 @@ export function ChatInterface() {
     } finally {
       setLoading(false);
     }
+  };
+  // Accept/Reject chat request handlers
+  const handleAcceptRequest = async () => {
+    if (!chatRequest) return;
+    setRequestLoading(true);
+    const { error } = await supabase.from('chat_requests').update({ status: 'accepted' }).eq('id', chatRequest.id);
+    if (!error) setChatRequest({ ...chatRequest, status: 'accepted' });
+    setRequestLoading(false);
+  };
+  const handleRejectRequest = async () => {
+    if (!chatRequest) return;
+    setRequestLoading(true);
+    const { error } = await supabase.from('chat_requests').update({ status: 'rejected' }).eq('id', chatRequest.id);
+    if (!error) setChatRequest({ ...chatRequest, status: 'rejected' });
+    setRequestLoading(false);
   };
 
   const formatTime = (timestamp: string) => {
@@ -340,35 +440,47 @@ export function ChatInterface() {
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Contacts
             </h3>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              placeholder="Search users..."
+              className="w-full mb-2 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
             {users.length === 0 ? (
               <p className="text-sm text-gray-500 text-center py-8">No users yet</p>
             ) : (
               <div className="space-y-1">
-                {users.map((user) => (
-                  <button
-                    key={user.id}
-                    onClick={() => setSelectedUser(user)}
-                    className={`w-full flex items-center space-x-3 p-3 rounded-lg transition ${
-                      selectedUser?.id === user.id
-                        ? 'bg-blue-50 border border-blue-200'
-                        : 'hover:bg-gray-50'
-                    }`}
-                  >
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0"
-                      style={{ backgroundColor: user.avatar_color }}
+                {users
+                  .filter(user =>
+                    user.display_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    user.email.toLowerCase().includes(searchTerm.toLowerCase())
+                  )
+                  .map((user) => (
+                    <button
+                      key={user.id}
+                      onClick={() => setSelectedUser(user)}
+                      className={`w-full flex items-center space-x-3 p-3 rounded-lg transition ${
+                        selectedUser?.id === user.id
+                          ? 'bg-blue-50 border border-blue-200'
+                          : 'hover:bg-gray-50'
+                      }`}
                     >
-                      {user.display_name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 text-left">
-                      <p className="font-medium text-gray-800">{user.display_name}</p>
-                      <p className="text-xs text-gray-500 flex items-center space-x-1">
-                        {statusOptions.find((s) => s.value === user.status)?.icon}
-                        <span>{user.status || 'Available'}</span>
-                      </p>
-                    </div>
-                  </button>
-                ))}
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0"
+                        style={{ backgroundColor: user.avatar_color }}
+                      >
+                        {user.display_name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 text-left">
+                        <p className="font-medium text-gray-800">{user.display_name}</p>
+                        <p className="text-xs text-gray-500 flex items-center space-x-1">
+                          {statusOptions.find((s) => s.value === user.status)?.icon}
+                          <span>{user.status || 'Available'}</span>
+                        </p>
+                      </div>
+                    </button>
+                  ))}
               </div>
             )}
           </div>
@@ -400,52 +512,94 @@ export function ChatInterface() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              {messages.map((message) => {
-                const isSent = message.sender_id === profile?.id;
-                return (
-                  <div key={message.id} className={`flex ${isSent ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-xs lg:max-w-md`}>
-                      <div
-                        className={`rounded-2xl px-4 py-2.5 ${
-                          isSent
-                            ? 'bg-blue-500 text-white rounded-br-sm'
-                            : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm'
-                        }`}
-                      >
-                        <p className="text-sm leading-relaxed">{message.content}</p>
-                      </div>
-                      <p
-                        className={`text-xs text-gray-500 mt-1 px-1 ${isSent ? 'text-right' : 'text-left'}`}
-                      >
-                        {formatTime(message.created_at)}
-                      </p>
+            {/* Chat request logic for 1-on-1 chat */}
+            {selectedUser && chatRequest && chatRequest.status === 'pending' && (
+              <div className="flex flex-col items-center justify-center p-6">
+                {chatRequest.sender_id === profile?.id ? (
+                  <>
+                    <p className="text-gray-500 text-sm mb-2">Waiting for {selectedUser.display_name} to accept your chat request...</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-gray-500 text-sm mb-2">{selectedUser.display_name} wants to chat with you.</p>
+                    <div className="flex space-x-2">
+                      <button onClick={handleAcceptRequest} disabled={requestLoading} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Accept</button>
+                      <button onClick={handleRejectRequest} disabled={requestLoading} className="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400">Reject</button>
                     </div>
-                  </div>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </div>
+                  </>
+                )}
+              </div>
+            )}
+            {selectedUser && chatRequest && chatRequest.status === 'rejected' && (
+              <div className="flex flex-col items-center justify-center p-6">
+                <p className="text-red-500 text-sm mb-2">Chat request was rejected.</p>
+              </div>
+            )}
 
-            <div className="bg-white border-t border-gray-200 p-4">
-              <form onSubmit={sendMessage} className="flex items-center space-x-3">
-                <input
-                  type="text"
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Type a message..."
-                  className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                  disabled={loading}
-                />
-                <button
-                  type="submit"
-                  disabled={loading || !newMessage.trim()}
-                  className="bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Send className="w-5 h-5" />
-                </button>
-              </form>
-            </div>
+            {/* Always show messages and input if a user or group is selected */}
+            {(selectedUser || selectedGroup) && (
+              <>
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  {messages.map((message) => {
+                    const isSent = message.sender_id === profile?.id;
+                    return (
+                      <div key={message.id} className={`flex ${isSent ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-xs lg:max-w-md`}>
+                          <div
+                            className={`rounded-2xl px-4 py-2.5 ${
+                              isSent
+                                ? 'bg-blue-500 text-white rounded-br-sm'
+                                : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm'
+                            }`}
+                          >
+                            <p className="text-sm leading-relaxed">{message.content}</p>
+                          </div>
+                          <p
+                            className={`text-xs text-gray-500 mt-1 px-1 ${isSent ? 'text-right' : 'text-left'}`}
+                          >
+                            {formatTime(message.created_at)}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                <div className="bg-white border-t border-gray-200 p-4">
+                  <form onSubmit={sendMessage} className="flex items-center space-x-3">
+                    <input
+                      type="text"
+                      value={newMessage}
+                      onChange={(e) => {
+                        setNewMessage(e.target.value);
+                        handleTyping();
+                      }}
+                      placeholder="Type a message..."
+                      className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                      disabled={loading}
+                    />
+                    <button
+                      type="submit"
+                      disabled={loading || !newMessage.trim()}
+                      className="bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Send className="w-5 h-5" />
+                    </button>
+                  </form>
+                </div>
+                {/* Typing indicator */}
+                {otherTyping && (
+                  <div className="px-6 pb-2 text-xs text-gray-500 animate-pulse">{selectedUser ? `${selectedUser.display_name} is typing...` : 'Someone is typing...'}</div>
+                )}
+              </>
+            )}
+            {/* For group chat, show as before */}
+            {selectedGroup && !selectedUser && !chatRequest && (
+              <>
+                {/* ...existing group chat UI... */}
+              </>
+            )}
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center bg-gray-50">
