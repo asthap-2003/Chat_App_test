@@ -273,27 +273,13 @@ export function ChatInterface() {
     e.preventDefault();
     if (!newMessage.trim() || loading) return;
     if (!profile) return;
+    // Block sending if chat is not accepted (for 1-on-1 chat)
+    if (selectedUser && (!chatRequest || chatRequest.status !== 'accepted')) {
+      alert('You can only send messages after the chat request is accepted.');
+      return;
+    }
     setLoading(true);
     try {
-      // Only allow sending if chat is accepted or group chat
-      if (selectedUser) {
-        if (!chatRequest) {
-          // Create a new chat request
-          const { data, error } = await supabase.from('chat_requests').insert({
-            sender_id: profile.id,
-            recipient_id: selectedUser.id,
-            status: 'pending',
-          }).select();
-          if (error) throw error;
-          setChatRequest(data[0]);
-          setLoading(false);
-          setNewMessage('');
-          return;
-        } else if (chatRequest.status !== 'accepted') {
-          setLoading(false);
-          return;
-        }
-      }
       let messageData: any = {
         sender_id: profile.id,
         content: newMessage.trim(),
@@ -308,11 +294,17 @@ export function ChatInterface() {
         setLoading(false);
         return;
       }
-      const { error } = await supabase.from('messages').insert(messageData);
-      if (error) throw error;
-      setNewMessage('');
+      const { data, error } = await supabase.from('messages').insert(messageData);
+      if (error) {
+        alert('Error sending message: ' + error.message);
+        console.error('Supabase error sending message:', error, messageData);
+      } else {
+        setNewMessage('');
+        console.log('Message sent:', data);
+      }
     } catch (error) {
-      console.error('Error sending message:', error);
+      alert('Exception sending message: ' + (error?.message || error));
+      console.error('Exception sending message:', error);
     } finally {
       setLoading(false);
     }
@@ -536,7 +528,7 @@ export function ChatInterface() {
               </div>
             )}
 
-            {/* Always show messages and input if a user or group is selected */}
+            {/* Always show messages, input, and typing indicator for direct messaging */}
             {(selectedUser || selectedGroup) && (
               <>
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -588,7 +580,7 @@ export function ChatInterface() {
                     </button>
                   </form>
                 </div>
-                {/* Typing indicator */}
+                {/* Typing indicator always visible for direct chat */}
                 {otherTyping && (
                   <div className="px-6 pb-2 text-xs text-gray-500 animate-pulse">{selectedUser ? `${selectedUser.display_name} is typing...` : 'Someone is typing...'}</div>
                 )}
