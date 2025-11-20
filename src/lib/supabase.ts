@@ -12,6 +12,7 @@ export interface Profile {
   avatar_color: string;
   created_at: string;
   last_seen: string;
+  status: string;
 }
 
 export interface Group {

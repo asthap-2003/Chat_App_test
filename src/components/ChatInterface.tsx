@@ -1,10 +1,29 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase, Profile, Message, Group } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Send, LogOut, User, Circle } from 'lucide-react';
+import { Send, LogOut, User, Circle, CheckCircle2, XCircle, MinusCircle, Clock, CircleDashed } from 'lucide-react';
 
 export function ChatInterface() {
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, setProfile } = useAuth?.() || {};
+  const statusOptions = [
+    { value: 'Available', label: 'Available', icon: <CheckCircle2 className="w-4 h-4 text-green-500 inline" /> },
+    { value: 'Busy', label: 'Busy', icon: <XCircle className="w-4 h-4 text-red-500 inline" /> },
+    { value: 'Do not disturb', label: 'Do not disturb', icon: <MinusCircle className="w-4 h-4 text-red-400 inline" /> },
+    { value: 'Be right back', label: 'Be right back', icon: <Clock className="w-4 h-4 text-yellow-500 inline" /> },
+    { value: 'Appear away', label: 'Appear away', icon: <CircleDashed className="w-4 h-4 text-yellow-400 inline" /> },
+    { value: 'Appear offline', label: 'Appear offline', icon: <Circle className="w-4 h-4 text-gray-400 inline" /> },
+  ];
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  const handleStatusChange = async (status: string) => {
+    if (!profile) return;
+    try {
+      await supabase.from('profiles').update({ status }).eq('id', profile.id);
+      if (setProfile) setProfile({ ...profile, status });
+    } catch (error) {
+      console.error('Error updating status:', error);
+    }
+    setShowStatusDropdown(false);
+  };
   const [users, setUsers] = useState<Profile[]>([]);
   const [selectedUser, setSelectedUser] = useState<Profile | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -222,18 +241,46 @@ export function ChatInterface() {
   return (
     <div className="flex h-screen bg-gray-50">
       <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
-        <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-blue-500 to-cyan-500">
+        <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-blue-500 to-cyan-500 relative">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div
-                className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
-                style={{ backgroundColor: profile?.avatar_color }}
-              >
-                {profile?.display_name.charAt(0).toUpperCase()}
+              <div className="relative w-10 h-10">
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
+                  style={{ backgroundColor: profile?.avatar_color }}
+                >
+                  {profile?.display_name.charAt(0).toUpperCase()}
+                </div>
+                {/* Status icon overlay styled like WhatsApp/Teams */}
+                <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full flex items-center justify-center bg-white border-2 border-white shadow" style={{ transform: 'translate(30%, 30%)' }}>
+                  <span className="w-3 h-3 rounded-full flex items-center justify-center">
+                    {statusOptions.find((s) => s.value === profile?.status)?.icon}
+                  </span>
+                </span>
               </div>
               <div>
                 <h2 className="font-semibold text-white">{profile?.display_name}</h2>
-                <p className="text-xs text-blue-100">Online</p>
+                <button
+                  className="flex items-center space-x-1 text-xs text-blue-100 bg-white/10 px-2 py-1 rounded hover:bg-white/20 transition"
+                  onClick={() => setShowStatusDropdown((v) => !v)}
+                >
+                  {statusOptions.find((s) => s.value === profile?.status)?.icon}
+                  <span>{profile?.status || 'Available'}</span>
+                </button>
+                {showStatusDropdown && (
+                  <div className="absolute z-10 mt-2 bg-white rounded shadow-lg left-24 w-48 border border-gray-200">
+                    {statusOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        className="flex items-center w-full px-4 py-2 text-sm hover:bg-gray-100"
+                        onClick={() => handleStatusChange(option.value)}
+                      >
+                        {option.icon}
+                        <span className="ml-2">{option.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <button
@@ -315,7 +362,10 @@ export function ChatInterface() {
                     </div>
                     <div className="flex-1 text-left">
                       <p className="font-medium text-gray-800">{user.display_name}</p>
-                      <p className="text-xs text-gray-500">{user.email}</p>
+                      <p className="text-xs text-gray-500 flex items-center space-x-1">
+                        {statusOptions.find((s) => s.value === user.status)?.icon}
+                        <span>{user.status || 'Available'}</span>
+                      </p>
                     </div>
                   </button>
                 ))}
@@ -343,8 +393,8 @@ export function ChatInterface() {
                     {selectedUser ? selectedUser.display_name : selectedGroup?.name}
                   </h2>
                   <div className="flex items-center space-x-1">
-                    <Circle className="w-2 h-2 fill-green-500 text-green-500" />
-                    <span className="text-xs text-gray-500">Online</span>
+                    {statusOptions.find((s) => s.value === (selectedUser ? selectedUser.status : profile?.status))?.icon}
+                    <span className="text-xs text-gray-500">{selectedUser ? selectedUser.status : profile?.status || 'Available'}</span>
                   </div>
                 </div>
               </div>
