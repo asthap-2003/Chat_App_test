@@ -14,10 +14,24 @@ export interface Profile {
   last_seen: string;
 }
 
+export interface Group {
+  id: string;
+  name: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface GroupMember {
+  group_id: string;
+  user_id: string;
+  joined_at: string;
+}
+
 export interface Message {
   id: string;
   sender_id: string;
-  recipient_id: string;
+  recipient_id?: string | null;
+  group_id?: string | null;
   content: string;
   created_at: string;
   read: boolean;
