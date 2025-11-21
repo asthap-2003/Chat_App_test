@@ -89,8 +89,17 @@ export function ChatInterface() {
   const handleStatusChange = async (status: string) => {
     if (!profile) return;
     try {
-      await supabase.from('profiles').update({ status }).eq('id', profile.id);
+      if (!status) throw new Error('No status provided');
+      const { error } = await supabase
+        .from('profiles')
+        .update({ status })
+        .eq('id', profile.id);
+      if (error) throw error;
       if (setProfile) setProfile({ ...profile, status });
+      // If viewing own profile in chat, update selectedUser state too
+      if (selectedUser && selectedUser.id === profile.id) {
+        setSelectedUser({ ...selectedUser, status });
+      }
     } catch (error) {
       console.error('Error updating status:', error);
     }
@@ -534,7 +543,33 @@ export function ChatInterface() {
                   </h2>
                   <div className="flex items-center space-x-1">
                     {statusOptions.find((s) => s.value === (selectedUser ? selectedUser.status : profile?.status))?.icon}
-                    <span className="text-xs text-gray-500">{selectedUser ? selectedUser.status : profile?.status || 'Available'}</span>
+                    <span className="text-xs text-gray-500">
+                      {selectedUser
+                        ? (() => {
+                            const status = selectedUser.status;
+                            if (status === 'Appear away' || status === 'Appear offline' || status === 'Be right back') {
+                              // Show last seen for these statuses
+                              if (selectedUser.last_seen) {
+                                const lastSeenDate = new Date(selectedUser.last_seen);
+                                const now = new Date();
+                                const diffMs = now.getTime() - lastSeenDate.getTime();
+                                const diffMin = Math.floor(diffMs / 60000);
+                                let lastSeenStr = '';
+                                if (diffMin < 1) lastSeenStr = 'just now';
+                                else if (diffMin < 60) lastSeenStr = `${diffMin} min ago`;
+                                else if (diffMin < 1440) lastSeenStr = `${Math.floor(diffMin/60)} hr ago`;
+                                else lastSeenStr = lastSeenDate.toLocaleString();
+                                return `Last seen ${lastSeenStr}`;
+                              } else {
+                                return 'Last seen unknown';
+                              }
+                            } else {
+                              // For other statuses, just show status
+                              return status || 'Available';
+                            }
+                          })()
+                        : (profile?.status || 'Available')}
+                    </span>
                   </div>
                 </div>
               </div>
