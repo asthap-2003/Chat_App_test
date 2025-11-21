@@ -30,6 +30,8 @@ export function ChatInterface() {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  // Message search state
+  const [messageSearch, setMessageSearch] = useState('');
   const [otherTyping, setOtherTyping] = useState(false);
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -565,30 +567,45 @@ export function ChatInterface() {
             {/* Always show messages, input, and typing indicator for direct messaging */}
             {(selectedUser || selectedGroup) && (
               <>
+
+                {/* Message search input */}
+                <div className="px-6 pt-2 pb-1">
+                  <input
+                    type="text"
+                    value={messageSearch}
+                    onChange={e => setMessageSearch(e.target.value)}
+                    placeholder="Search messages..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                  {messages.map((message) => {
-                    const isSent = message.sender_id === profile?.id;
-                    return (
-                      <div key={message.id} className={`flex ${isSent ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-xs lg:max-w-md`}>
-                          <div
-                            className={`rounded-2xl px-4 py-2.5 ${
-                              isSent
-                                ? 'bg-blue-500 text-white rounded-br-sm'
-                                : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm'
-                            }`}
-                          >
-                            <p className="text-sm leading-relaxed">{message.content}</p>
+                  {messages
+                    .filter(m =>
+                      !messageSearch.trim() || m.content.toLowerCase().includes(messageSearch.toLowerCase())
+                    )
+                    .map((message) => {
+                      const isSent = message.sender_id === profile?.id;
+                      return (
+                        <div key={message.id} className={`flex ${isSent ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-xs lg:max-w-md`}>
+                            <div
+                              className={`rounded-2xl px-4 py-2.5 ${
+                                isSent
+                                  ? 'bg-blue-500 text-white rounded-br-sm'
+                                  : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm'
+                              }`}
+                            >
+                              <p className="text-sm leading-relaxed">{message.content}</p>
+                            </div>
+                            <p
+                              className={`text-xs text-gray-500 mt-1 px-1 ${isSent ? 'text-right' : 'text-left'}`}
+                            >
+                              {formatTime(message.created_at)}
+                            </p>
                           </div>
-                          <p
-                            className={`text-xs text-gray-500 mt-1 px-1 ${isSent ? 'text-right' : 'text-left'}`}
-                          >
-                            {formatTime(message.created_at)}
-                          </p>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                   <div ref={messagesEndRef} />
                 </div>
 
