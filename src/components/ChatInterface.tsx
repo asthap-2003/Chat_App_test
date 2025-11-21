@@ -1,11 +1,14 @@
 
-
 import { useState, useEffect, useRef } from 'react';
 import { supabase, Profile, Message, Group, ChatRequest } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Send, LogOut, User, Circle, CheckCircle2, XCircle, MinusCircle, Clock, CircleDashed } from 'lucide-react';
 
+// Notification state and settings
+// (must be inside the component, after imports)
+
 export function ChatInterface() {
+
 
   const { profile, signOut, setProfile } = useAuth();
   const statusOptions = [
@@ -16,6 +19,8 @@ export function ChatInterface() {
     { value: 'Appear away', label: 'Appear away', icon: <CircleDashed className="w-4 h-4 text-yellow-400 inline" /> },
     { value: 'Appear offline', label: 'Appear offline', icon: <Circle className="w-4 h-4 text-gray-400 inline" /> },
   ];
+
+
   // All state declarations must be above any use/effect
   const [chatRequest, setChatRequest] = useState<ChatRequest | null>(null);
   const [requestLoading, setRequestLoading] = useState(false);
@@ -38,6 +43,35 @@ export function ChatInterface() {
 
   // Latest message for each contact
   const [latestMessages, setLatestMessages] = useState<{ [userId: string]: Message | null }>({});
+
+
+  // Notification state and settings (must be after all useState declarations)
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [notification, setNotification] = useState<string | null>(null);
+
+  // Show notification for new messages if enabled
+  useEffect(() => {
+    if (!notificationsEnabled) return;
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      // Show notification for any new message not sent by the current user
+      if (lastMsg.sender_id !== profile?.id) {
+        const sender = users.find(u => u.id === lastMsg.sender_id);
+        setNotification(`New message from ${sender?.display_name || 'someone'}: ${lastMsg.content}`);
+      }
+    }
+  }, [messages, notificationsEnabled, users, profile]);
+
+  // Settings button for notification toggle
+  const SettingsButton = () => (
+    <button
+      className="ml-2 px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-xs"
+      onClick={() => setNotificationsEnabled((v) => !v)}
+      title="Toggle notifications"
+    >
+      {notificationsEnabled ? '🔔 Notifications On' : '🔕 Notifications Off'}
+    </button>
+  );
   // Load latest message for each user
   const loadLatestMessages = async () => {
     if (!profile) return;
@@ -368,6 +402,19 @@ export function ChatInterface() {
   return (
     <div className="flex h-screen bg-gray-50">
       <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
+        {/* Notification popup */}
+        {notification && notificationsEnabled && (
+          <div className="fixed top-4 right-4 z-50 bg-blue-600 text-white px-4 py-2 rounded shadow-lg flex items-center animate-bounce">
+            <span>{notification}</span>
+            <button
+              className="ml-4 px-2 py-1 bg-blue-800 rounded text-white hover:bg-blue-900"
+              onClick={() => setNotification(null)}
+              title="Dismiss notification"
+            >
+              ×
+            </button>
+          </div>
+        )}
         <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-blue-500 to-cyan-500 relative">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -387,6 +434,7 @@ export function ChatInterface() {
               </div>
               <div>
                 <h2 className="font-semibold text-white">{profile?.display_name}</h2>
+                <SettingsButton />
                 <button
                   className="flex items-center space-x-1 text-xs text-blue-100 bg-white/10 px-2 py-1 rounded hover:bg-white/20 transition"
                   onClick={() => setShowStatusDropdown((v) => !v)}
