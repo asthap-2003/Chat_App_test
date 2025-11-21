@@ -47,20 +47,35 @@ export function ChatInterface() {
 
   // Notification state and settings (must be after all useState declarations)
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
   const [notification, setNotification] = useState<string | null>(null);
+  const lastNotifiedMsgId = useRef<string | null>(null);
+
 
   // Show notification for new messages if enabled
   useEffect(() => {
     if (!notificationsEnabled) return;
     if (messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
-      // Show notification for any new message not sent by the current user
-      if (lastMsg.sender_id !== profile?.id) {
+      // Only show notification for a new message (not already notified)
+      if (
+        lastMsg.sender_id !== profile?.id &&
+        lastMsg.id !== lastNotifiedMsgId.current
+      ) {
         const sender = users.find(u => u.id === lastMsg.sender_id);
         setNotification(`New message from ${sender?.display_name || 'someone'}: ${lastMsg.content}`);
+        lastNotifiedMsgId.current = lastMsg.id;
       }
     }
   }, [messages, notificationsEnabled, users, profile]);
+
+  // Auto-dismiss notification after 4 seconds
+  useEffect(() => {
+    if (notification) {
+      const timeout = setTimeout(() => setNotification(null), 4000);
+      return () => clearTimeout(timeout);
+    }
+  }, [notification]);
 
   // Settings button for notification toggle
   const SettingsButton = () => (
