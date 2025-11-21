@@ -312,11 +312,7 @@ export function ChatInterface() {
     e.preventDefault();
     if (!newMessage.trim() || loading) return;
     if (!profile) return;
-    // Block sending if chat is not accepted (for 1-on-1 chat)
-    if (selectedUser && (!chatRequest || chatRequest.status !== 'accepted')) {
-      alert('You can only send messages after the chat request is accepted.');
-      return;
-    }
+    // Allow direct messages without requiring chat request acceptance
     setLoading(true);
     try {
       let messageData: any = {
